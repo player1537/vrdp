@@ -18,6 +18,7 @@ FROM base AS dist
 
 WORKDIR /app
 COPY server.py /app/
+COPY static /app/static
 
 ENTRYPOINT ["python3.7", "-u", "server.py"]
 CMD []

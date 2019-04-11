@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 
 tag=vrdp:$USER
-name=vrdp_service
+name=vrdp_$USER
 target=base
-data=/mnt/seenas2/data
+data=
 run=/var/run/nginx
 unix=$run/vrdp.is.mediocreatbest.xyz.sock
-registry=accona.eecs.utk.edu:5000
+registry=
 xauth=
 entrypoint=
 ipc=
@@ -16,6 +16,7 @@ cwd=1
 interactive=1
 script=
 port=8800
+restart=unless-stopped
 
 build() {
 	docker build \
@@ -49,6 +50,21 @@ inspect() {
 
 script() {
 	interactive= script=1 run "$@"
+}
+
+start() {
+	target=dist build && \
+	docker run -d \
+		${restart:+--restart $restart} \
+		${name:+--name $name} \
+		${data:+-v $data:$data} \
+		${run:+-v $run:$run} \
+		$tag \
+		unix --bind $unix
+}
+
+stop() {
+	docker stop $name "$@" && docker rm $name
 }
 
 push() {
