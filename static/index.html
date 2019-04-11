@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<title>vrdp</title>
+<style>
+</style>
+<body>
+<h1>Hello vrdp</h1>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@0.3.20/dist/peer.min.js"></script>
+<script src="https://unpkg.com/three@0.103.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.103.0/examples/js/vr/WebVR.js"></script>
+<script src="https://unpkg.com/three@0.103.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(() => {
+
+const options = {};
+for (let x of window.location.hash.substring(1).split(',')) {
+	const [key, value] = x.split('=');
+	options[key] = value;
+}
+window.options = options;
+
+const old = window.location.hash;
+
+setInterval(() => {
+	if (old !== window.location.hash) {
+		window.location.reload();
+	}
+}, 1000);
+
+})();
+</script>
+<script>
+if (options.recenter) (async () => {
+
+const response = await fetch('/recenter/', {
+	method: 'POST',
+	body: 'ok',
+});
+const ok = await response.text();
+
+console.log('ok', ok);
+
+})();
+</script>
+<script>
+(async () => {
+
+function delay(ms=100) {
+	return new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	});
+}
+
+const peer = new Peer();
+
+peer.on('open', async (id) => {
+	console.log('open', id);
+	if (!options.connect) {
+		const response = await fetch('/peer/', {
+			method: 'POST',
+			body: id,
+		});
+		const ok = await response.text();
+	
+		console.log('ok', ok);
+	}
+});
+
+peer.on('connection', (dataConnection) => {
+	console.log('connection');
+});
+
+peer.on('call', (mediaConnection) => {
+	console.log('call', mediaConnection);
+	mediaConnection.on('stream', async (stream) => {
+		console.log('stream', stream);
+		
+		const video = document.createElement('video');
+		video.playsInline = true;
+		video.controls = true;
+		video.autoplay = true;
+		video.muted = false;
+		video.srcObject = stream;
+		video.load();
+		
+		const button = document.createElement('button');
+		button.addEventListener('click', () => {
+			video.play();
+			document.body.removeChild(button);
+		}, false);
+		button.appendChild(document.createTextNode('start video'));
+		document.body.appendChild(button);
+		
+		await new Promise((resolve) => {
+			video.addEventListener('play', resolve, true);
+		});
+		
+		await video.play().catch((err) => console.error(err));
+		
+		const renderer = new THREE.WebGLRenderer();
+		renderer.setSize(500, 500);
+		if (options.vr) renderer.vr.enabled = true;
+		if (options.vr) renderer.vr.setFrameOfReferenceType('not-stage');
+		document.body.appendChild(renderer.domElement);
+		
+		if (options.vr) document.body.appendChild(WEBVR.createButton(renderer));
+		
+		const camera = new THREE.PerspectiveCamera(75, 500 / 500, 0.1, 1000);
+		if (!options.vr) camera.position.set(2,2,2);
+		
+		let controls;
+		if (!options.vr) controls = new THREE.OrbitControls(camera, renderer.domElement);
+	
+		const scene = new THREE.Scene();
+
+		const group = new THREE.Group();
+		scene.add(group);
+		
+		const geometry = new THREE.PlaneBufferGeometry(0.1, 0.1);
+		const texture = new THREE.VideoTexture(video);
+		texture.minFilter = THREE.LinearFilter;
+		texture.magFilter = THREE.LinearFilter;
+		texture.format = THREE.RGBFormat;
+		const material = new THREE.MeshBasicMaterial({ map: texture });
+		const mesh = new THREE.Mesh(geometry, material);
+		mesh.position.set(0, 0, -0.5);
+		group.add(mesh);
+		
+		recenter();
+		size();
+		if (options.vr) renderer.setAnimationLoop(render);
+		if (!options.vr) render();
+		function render() {
+			if (!options.vr) requestAnimationFrame(render);
+			if (!options.vr) controls.target.copy(scene.position);
+			if (!options.vr) controls.update();
+			mesh.lookAt(camera.position);
+			renderer.render(scene, camera);
+		}
+		
+		async function recenter() {
+			for (;;) {
+				const response = await fetch('/recenter/');
+				const ok = await response.text();
+				
+				const dir = new THREE.Vector3();
+				camera.getWorldDirection(dir);
+				dir.negate();
+				group.lookAt(dir);
+			}
+		}
+		
+		async function size() {
+			for (;;) {
+				const response = await fetch('/size/');
+				const size = +(await response.text());
+				mesh.scale.set(size, size, size);
+			}
+		}
+		
+		});
+	
+	mediaConnection.on('close', () => {
+		console.log('close');
+	});
+	
+	mediaConnection.on('error', (err) => {
+		console.log('error', err);
+	});
+	
+	mediaConnection.answer();
+});
+
+peer.on('close', () => {
+	console.log('close');
+});
+
+peer.on('disconnected', () => {
+	console.log('disconnected');
+});
+
+peer.on('error', (err) => {
+	console.log('error', err);
+});
+
+if (options.connect) {
+	const response = await fetch('/peer/');
+	const id = await response.text();
+	console.log({ id });
+	
+	const stream = await navigator.mediaDevices.getDisplayMedia({
+		displaySurface: 'monitor',
+	});
+	console.log({ stream });
+	
+	let size = 1, callbackId = null;
+	
+	const div = document.createElement('div');
+	with (div.style) {
+		width = '512px';
+		height = '512px';
+		border = '1px solid black';
+	}
+	div.addEventListener('wheel', wheel, {
+		capture: true,
+		passive: false,
+	});
+	document.body.appendChild(div);
+	
+	function wheel(e) {
+		e.preventDefault();
+		size += 0.01 * (e.deltaY < 0 ? -1 : 1);
+		if (!callbackId) callbackId = requestAnimationFrame(updateSize);
+		return false;
+	}
+	
+	async function updateSize() {
+		const response = await fetch('/size/', {
+			method: 'POST',
+			body: '' + size,
+		});
+		const ok = await response.text();
+		callbackId = false;
+	}
+	
+	peer.call(id, stream);
+}
+
+})();
+</script>

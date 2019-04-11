@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<title>vrdp</title>
+<style>
+</style>
+<body>
+<script src="https://unpkg.com/three@0.103.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.103.0/examples/js/vr/WebVR.js"></script>
+<script src="https://unpkg.com/three@0.103.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(() => {
+
+const options = {};
+for (let x of window.location.hash.substring(1).split(',')) {
+	const [key, value] = x.split('=');
+	options[key] = value;
+}
+window.options = options;
+
+const old = window.location.hash;
+
+setInterval(() => {
+	if (old !== window.location.hash) {
+		window.location.reload();
+	}
+}, 1000);
+
+})();
+</script>
+<script>
+if (options.recenter) (async () => {
+
+const response = await fetch('/recenter/', {
+	method: 'POST',
+	body: 'ok',
+});
+const ok = await response.text();
+
+console.log('ok', ok);
+
+})();
+</script>
+<script>
+(async () => {
+
+const renderer = new THREE.WebGLRenderer();
+//renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(500, 500);
+renderer.vr.enabled = true;
+renderer.vr.setFrameOfReferenceType('not-stage');
+document.body.appendChild(renderer.domElement);
+
+document.body.appendChild(WEBVR.createButton(renderer));
+
+const camera = new THREE.PerspectiveCamera(75, 500 / 500, 0.001, 10);
+camera.up.set(0, 1, 0);
+camera.position.set(-5, 0, 0);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+	
+const scene = new THREE.Scene();
+
+const group = new THREE.Group();
+scene.add(group);
+
+const positions = [[-1,0,0],[0,-1,0],[0,0,-1]];
+const colors = [0xff0000, 0x00ff00, 0x0000ff];
+for (let i=0; i<3; ++i)
+for (let j=0; j<10; ++j) {
+	const geometry = new THREE.TorusKnotBufferGeometry(0.1, 0.04);
+	const material = new THREE.MeshBasicMaterial({ color: colors[i] });
+	const mesh = new THREE.Mesh(geometry, material);
+	const [x, y, z] = positions[i];
+	mesh.position.set(x*j, y*j, z*j);
+	group.add(mesh);
+}
+
+recenter();
+renderer.setAnimationLoop(render);
+//render();
+function render() {
+	//requestAnimationFrame(render);
+	renderer.render(scene, camera);
+}
+
+async function recenter() {
+	for (;;) {
+		const response = await fetch('/recenter/');
+		const ok = await response.text();
+		
+		const dir = new THREE.Vector3();
+		camera.getWorldDirection(dir);
+		dir.negate();
+		group.lookAt(dir);
+	}
+}
+
+})();
+</script>
