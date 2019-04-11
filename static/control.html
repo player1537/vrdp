@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<title>VRDP Controller</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<style>
+* {
+	box-sizing: border-box;
+	padding: 0;
+	margin: 0;
+}
+
+body {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 100vw;
+	height: 100vh;
+}
+
+#a {
+	margin: auto;
+	border: 1px solid black;
+}
+
+#qr {
+	width: 512px;
+	height: 512px;
+}
+
+#control {
+	margin: auto;
+	width: 512px;
+	height: 512px;
+	border: 1px solid black;
+	display: flex;
+	position: relative;
+}
+
+#control:before {
+	margin: auto;
+	content: 'Click Center: Recenter VR Display\A Scroll Center: Scale VR Display\A Click Right: Split Screen Vertically\A Click Bottom: Split Screen Horizontally\A Click Left: Remove Last Split';
+	white-space: pre-wrap;
+}
+
+#control:after {
+	content: '';
+	position: absolute;
+	left: 10%;
+	top: 10%;
+	width: 80%;
+	height: 80%;
+	border: 1px solid black;
+}
+
+#control > video {
+	position: absolute;
+	left: 0;
+	top: 0;
+	width: 100%;
+	height: 100%;
+	opacity: 0.1;
+	object-fit: fill;
+}
+
+#control > .split {
+	position: absolute;
+	background-color: black;
+}
+
+#control > .split.h {
+	width: 100%;
+	height: 5px;
+	left: 0;
+}
+
+#control > .split.v {
+	top: 0;
+	height: 100%;
+	width: 5px;
+}
+</style>
+<body>
+<a id="a">
+	<canvas id="qr"></canvas>
+</a>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@0.3.20/dist/peer.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+<script>
+(async () => {
+	const sid = window.location.pathname.split('/')[2];
+
+	const peer = new Peer();
+	
+	a.href = `https://${window.location.hostname}/c/${sid}/view/`;
+	new QRious({
+		element: qr,
+		size: 512,
+		value: `https://${window.location.hostname}/c/${sid}/view/#vr=1`,
+	});
+	
+	const id = await (await fetch(`/c/${sid}/peer/`)).text();
+	console.log('id', id);
+	
+	document.body.removeChild(a);
+
+	const stream = await navigator.mediaDevices.getDisplayMedia({
+		displaySurface: 'monitor',
+	});
+	peer.call(id, stream);
+	
+	const control = document.createElement('div');
+	control.id = 'control';
+	const video = document.createElement('video');
+	video.id = 'video';
+	video.autoplay = '1';
+	control.appendChild(video);
+	document.body.appendChild(control);
+	
+	video.srcObject = stream;
+	
+	let size = 1, sizePending = null;
+	control.addEventListener('wheel', (e) => {
+		e.preventDefault();
+		size += 0.01 * (e.deltaY < 0 ? -1 : 1);
+		if (!sizePending) {
+			sizePending = requestAnimationFrame(async () => {
+				const response = await fetch(`/c/${sid}/size/`, {
+					method: 'POST',
+					body: '' + size,
+				});
+				const ok = await response.text();
+				console.log('size', ok);
+				sizePending = null;
+			});
+		}
+		return false;
+	}, {
+		capture: true,
+		passive: false,
+	});
+	let mode = null, split = null;
+	const splits = [];
+	control.addEventListener('mousedown', async (e) => {
+		const rect = control.getBoundingClientRect();
+		const x = (e.x - rect.left) / rect.width;
+		const y = (e.y - rect.top) / rect.height;
+		split = document.createElement('div');
+		split.classList.add('split');
+		mode = null;
+		if (x > 0.9) {
+			mode = 'h';
+			split.classList.add(mode);
+			split.style.top = (100 * y) + '%';
+		} else if (y > 0.9) {
+			mode = 'v';
+			split.classList.add(mode);
+			split.style.left = (100 * x) + '%';
+		} else if (x < 0.1) {
+			if (splits.length) {
+				splits.pop();
+				control.removeChild(control.lastChild);
+				resplit();
+			}
+		} else if (y < 0.1) {
+		
+		} else {
+			const response = await fetch(`/c/${sid}/recenter/`, {
+				method: 'POST',
+				body: 'ok',
+			});
+			const ok = await response.text();
+			console.log('recenter', ok);
+		}
+		if (mode) {
+			control.appendChild(split);
+			control.classList.add(mode);
+			window.addEventListener('mousemove', mousemove, false);
+			window.addEventListener('mouseup', mouseup, false);
+		}
+	}, false);
+	function mousemove(e) {
+		const rect = control.getBoundingClientRect();
+		const x = (e.x - rect.left) / rect.width;
+		const y = (e.y - rect.top) / rect.height;
+		if (mode === 'h') {
+			split.style.top = `${100*y}%`;
+		} else if (mode === 'v') {
+			split.style.left = `${100*x}%`;
+		}
+	}
+	function mouseup(e) {
+		const rect = control.getBoundingClientRect();
+		const x = (e.x - rect.left) / rect.width;
+		const y = (e.y - rect.top) / rect.height;
+		if (mode === 'h') {
+			splits.push({ mode, y });
+		} else if (mode === 'v') {
+			splits.push({ mode, x });
+		}
+		control.classList.remove(mode);
+		window.removeEventListener('mousemove', mousemove, false);
+		window.removeEventListener('mouseup', mouseup, false);
+		resplit();
+	}
+	async function resplit() {
+		const response = await fetch(`/c/${sid}/split/`, {
+			method: 'POST',
+			body: JSON.stringify(splits),
+		});
+		const ok = await response.text();
+		console.log('split', ok);
+	}
+
+})();
+</script>

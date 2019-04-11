@@ -1,229 +1,52 @@
 <!DOCTYPE html>
-<title>vrdp</title>
+<title>VRDP Virtual Reality Remote Desktop Viewer</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/kognise/water.css@latest/dist/light.css">
 <style>
+body {
+	padding-bottom: 10vh;
+	overflow-x: hidden;
+}
+
+#input {
+	width: 80vw;
+}
+
+#button {
+	width: 50vw;
+}
+
+#input, #button {
+	margin-left: 50%;
+	transform: translateX(-50%);
+}
 </style>
 <body>
-<h1>Hello vrdp</h1>
-<script src="https://cdn.jsdelivr.net/npm/peerjs@0.3.20/dist/peer.min.js"></script>
-<script src="https://unpkg.com/three@0.103.0/build/three.min.js"></script>
-<script src="https://unpkg.com/three@0.103.0/examples/js/vr/WebVR.js"></script>
-<script src="https://unpkg.com/three@0.103.0/examples/js/controls/OrbitControls.js"></script>
+<main>
+<article>
+<hgroup><h1>VRDP</h1> <h2>Virtual Reality Remote Desktop Viewer</h2></hgroup>
+<p>This project intends to offer an easy way to test out a VR-style of remote desktop application, or in other words, a way to view your computer screen in VR. This may not seem immediately useful, but it would also allow working with your computer in whatever environment you want, such as in the woods or at a beach.</p>
+<p>Due to restrictions of WebRTC and WebVR, there are several steps that need to be done to get the system started. This assumes you're using a laptop for the screen and a phone for your VR device.</p>
+<ol><li>Laptop: Click the button below to create a new room.</li>
+<li>Phone: Scan the QR code with your WebVR device to connect to your computer.</li>
+<li>Laptop: Select what screen(s) you want to view from the phone.</li>
+<li>Phone: Press the "Start Video" button.</li>
+<li>Phone: Press the "Enter VR" button.</li>
+<li>Phone: Put your phone in whatever VR viewer you use.</li>
+<li>Laptop: Use your computer like normal, but now see your screen in VR.</li>
+<li>Laptop: Using the "controller" page, you can change different things like the scale of the displays, how the screens are split, and recenter the displays using the box on the screen.</li></ol>
+<input type="text" id="input"></input>
+<button id="button">Enter Room</button>
+<p><i>Note: Though the ideal use case is to position the screens in some 360-degree environment, I haven't done this yet. This is mostly a tech demo to see if the idea is even feasible.</i></p>
 <script>
-(() => {
-
-const options = {};
-for (let x of window.location.hash.substring(1).split(',')) {
-	const [key, value] = x.split('=');
-	options[key] = value;
-}
-window.options = options;
-
-const old = window.location.hash;
-
-setInterval(() => {
-	if (old !== window.location.hash) {
-		window.location.reload();
-	}
-}, 1000);
-
-})();
-</script>
-<script>
-if (options.recenter) (async () => {
-
-const response = await fetch('/recenter/', {
-	method: 'POST',
-	body: 'ok',
-});
-const ok = await response.text();
-
-console.log('ok', ok);
-
-})();
-</script>
-<script>
-(async () => {
-
-function delay(ms=100) {
-	return new Promise((resolve) => {
-		setTimeout(resolve, ms);
+function uuidv4() {
+	return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+		var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+		return v.toString(16);
 	});
 }
-
-const peer = new Peer();
-
-peer.on('open', async (id) => {
-	console.log('open', id);
-	if (!options.connect) {
-		const response = await fetch('/peer/', {
-			method: 'POST',
-			body: id,
-		});
-		const ok = await response.text();
-	
-		console.log('ok', ok);
-	}
-});
-
-peer.on('connection', (dataConnection) => {
-	console.log('connection');
-});
-
-peer.on('call', (mediaConnection) => {
-	console.log('call', mediaConnection);
-	mediaConnection.on('stream', async (stream) => {
-		console.log('stream', stream);
-		
-		const video = document.createElement('video');
-		video.playsInline = true;
-		video.controls = true;
-		video.autoplay = true;
-		video.muted = false;
-		video.srcObject = stream;
-		video.load();
-		
-		const button = document.createElement('button');
-		button.addEventListener('click', () => {
-			video.play();
-			document.body.removeChild(button);
-		}, false);
-		button.appendChild(document.createTextNode('start video'));
-		document.body.appendChild(button);
-		
-		await new Promise((resolve) => {
-			video.addEventListener('play', resolve, true);
-		});
-		
-		await video.play().catch((err) => console.error(err));
-		
-		const renderer = new THREE.WebGLRenderer();
-		renderer.setSize(500, 500);
-		if (options.vr) renderer.vr.enabled = true;
-		if (options.vr) renderer.vr.setFrameOfReferenceType('not-stage');
-		document.body.appendChild(renderer.domElement);
-		
-		if (options.vr) document.body.appendChild(WEBVR.createButton(renderer));
-		
-		const camera = new THREE.PerspectiveCamera(75, 500 / 500, 0.1, 1000);
-		if (!options.vr) camera.position.set(2,2,2);
-		
-		let controls;
-		if (!options.vr) controls = new THREE.OrbitControls(camera, renderer.domElement);
-	
-		const scene = new THREE.Scene();
-
-		const group = new THREE.Group();
-		scene.add(group);
-		
-		const geometry = new THREE.PlaneBufferGeometry(0.1, 0.1);
-		const texture = new THREE.VideoTexture(video);
-		texture.minFilter = THREE.LinearFilter;
-		texture.magFilter = THREE.LinearFilter;
-		texture.format = THREE.RGBFormat;
-		const material = new THREE.MeshBasicMaterial({ map: texture });
-		const mesh = new THREE.Mesh(geometry, material);
-		mesh.position.set(0, 0, -0.5);
-		group.add(mesh);
-		
-		recenter();
-		size();
-		if (options.vr) renderer.setAnimationLoop(render);
-		if (!options.vr) render();
-		function render() {
-			if (!options.vr) requestAnimationFrame(render);
-			if (!options.vr) controls.target.copy(scene.position);
-			if (!options.vr) controls.update();
-			mesh.lookAt(camera.position);
-			renderer.render(scene, camera);
-		}
-		
-		async function recenter() {
-			for (;;) {
-				const response = await fetch('/recenter/');
-				const ok = await response.text();
-				
-				const dir = new THREE.Vector3();
-				camera.getWorldDirection(dir);
-				dir.negate();
-				group.lookAt(dir);
-			}
-		}
-		
-		async function size() {
-			for (;;) {
-				const response = await fetch('/size/');
-				const size = +(await response.text());
-				mesh.scale.set(size, size, size);
-			}
-		}
-		
-		});
-	
-	mediaConnection.on('close', () => {
-		console.log('close');
-	});
-	
-	mediaConnection.on('error', (err) => {
-		console.log('error', err);
-	});
-	
-	mediaConnection.answer();
-});
-
-peer.on('close', () => {
-	console.log('close');
-});
-
-peer.on('disconnected', () => {
-	console.log('disconnected');
-});
-
-peer.on('error', (err) => {
-	console.log('error', err);
-});
-
-if (options.connect) {
-	const response = await fetch('/peer/');
-	const id = await response.text();
-	console.log({ id });
-	
-	const stream = await navigator.mediaDevices.getDisplayMedia({
-		displaySurface: 'monitor',
-	});
-	console.log({ stream });
-	
-	let size = 1, callbackId = null;
-	
-	const div = document.createElement('div');
-	with (div.style) {
-		width = '512px';
-		height = '512px';
-		border = '1px solid black';
-	}
-	div.addEventListener('wheel', wheel, {
-		capture: true,
-		passive: false,
-	});
-	document.body.appendChild(div);
-	
-	function wheel(e) {
-		e.preventDefault();
-		size += 0.01 * (e.deltaY < 0 ? -1 : 1);
-		if (!callbackId) callbackId = requestAnimationFrame(updateSize);
-		return false;
-	}
-	
-	async function updateSize() {
-		const response = await fetch('/size/', {
-			method: 'POST',
-			body: '' + size,
-		});
-		const ok = await response.text();
-		callbackId = false;
-	}
-	
-	peer.call(id, stream);
-}
-
-})();
+input.value = uuidv4();
+button.addEventListener('click', () => {
+	window.location = `/c/${input.value}/control/`;
+}, false);
 </script>

@@ -1,0 +1,5 @@
+Given a user
+When they go to the control page
+And they open the view page
+And they open another view page
+Then the control page should use the new connection

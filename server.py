@@ -9,12 +9,34 @@ from socketserver import UnixStreamServer
 from typing import List, Dict, Tuple, Union
 from threading import Event
 from pathlib import Path
+from dataclasses import dataclass, field
+from collections import defaultdict
 
 
-_g_peer: bytes = b''
-_g_recenter = Event()
-_g_size: bytes = b'1'
-_g_size_event = Event()
+@dataclass
+class Part:
+	data: bytes = field(default=b'')
+	event: Event = field(default_factory=Event)
+	
+	def wait(self) -> bytes:
+		self.event.clear()
+		self.event.wait()
+		return self.data
+	
+	def set(self, data: bytes):
+		self.data = data
+		self.event.set()
+
+
+@dataclass
+class Client:
+	parts: Dict[str, Part] = field(default_factory=lambda: defaultdict(Part))
+	
+	def __getitem__(self, name: str) -> Part:
+		return self.parts[name]
+
+
+_g_clients: Dict[str, Client] = defaultdict(Client)
 
 
 class RequestHandler(SimpleHTTPRequestHandler):
@@ -28,69 +50,69 @@ class RequestHandler(SimpleHTTPRequestHandler):
 			self.directory = 'static'
 			super().do_GET()
 		elif self.path.startswith('/static/'):
+			self.path = self.path[len('/static'):]
+			self.directory = 'static'
 			super().do_GET()
-		elif self.path == '/peer/':
-			self.do_GET_peer()
-		elif self.path == '/recenter/':
-			self.do_GET_recenter()
-		elif self.path == '/size/':
-			self.do_GET_size()
+		elif self.path.startswith('/c/'):
+			self.do_GET_client()
 		else:
 			print('GET', self.path)
 			raise NotImplementedError
 	
-	def do_GET_peer(self):
-		"""GET /peer/ -> id"""
+	def do_GET_client(self):
+		"""GET /c/{id}/{name}/ -[long poll]-> {data}"""
+		_, c, id, name, _2 = self.path.split('/')
 		
-		content = _g_peer
+		if name == 'view':
+			self.do_GET_view()
+		elif name == 'control':
+			self.do_GET_control()
+		else:
+			self.do_GET_part()
+	
+	def do_GET_view(self):
+		"""GET /c/{id}/view/ -> {html}"""
+		path = Path.cwd() / 'static' / 'view.html'
+		content = path.read_bytes()
+		self.send('text/html', content)
+	
+	def do_GET_control(self):
+		"""GET /c/{id}/control/ -> {html}"""
+		path = Path.cwd() / 'static' / 'control.html'
+		content = path.read_bytes()
+		self.send('text/html', content)
+	
+	def do_GET_part(self):
+		"""GET /c/{id}/{name}/ -[long poll]-> {data}"""
+		_, c, id, name, _2 = self.path.split('/')
+		client = _g_clients[id]
+		part = client[name]
+		content = part.wait()
 		self.send('text/plain', content)
-	
-	def do_GET_recenter(self):
-		"""GET /recenter/ -[long poll]-> ok"""
-		
-		_g_recenter.clear()
-		_g_recenter.wait()
-		self.send('text/plain', b'ok')
-	
-	def do_GET_size(self):
-		"""GET /size/ -[long poll]-> {size}"""
-		_g_size_event.clear()
-		_g_size_event.wait()
-		self.send('text/plain', _g_size)
-	
+
 	def do_POST(self):
 		length = self.headers['content-length']
 		nbytes = int(length)
 		data = self.rfile.read(nbytes)
 		# throw away extra data? see Lib/http/server.py:1203-1205
 		self.data = data
-
-		if self.path == '/peer/':
-			self.do_POST_peer()
-		elif self.path == '/recenter/':
-			self.do_POST_recenter()
-		elif self.path == '/size/':
-			self.do_POST_size()
+		
+		if self.path.startswith('/c/'):
+			self.do_POST_client()
 		else:
 			print('POST', self.path)
 			raise NotImplementedError
 	
-	def do_POST_peer(self):
-		global _g_peer
-		_g_peer = self.data
+	def do_POST_client(self):
+		"""POST /c/{id}/{part}/ {data} -> ok"""
+		_, c, id, name, _2 = self.path.split('/')
+		
+		client = _g_clients[id]
+		part = client[name]
+		part.set(self.data)
 		
 		self.send('text/plain', b'ok')
-	
-	def do_POST_recenter(self):
-		_g_recenter.set()
-		self.send('text/plain', b'ok')
-	
-	def do_POST_size(self):
-		global _g_size
-		_g_size = self.data
-		_g_size_event.set()
-		self.send('text/plain', b'ok')
-	
+
 	def send(self, content_type, content):
 		use_keep_alive = self._should_use_keep_alive()
 		use_gzip = self._should_use_gzip()
